@@ -67,7 +67,7 @@ index fa8a94c..8dff08a 100644
        "third_party/fbgemm/external/asmjit appears incomplete.\n"
        "Please run: git submodule update --init --recursive"
 diff --git a/torch/CMakeLists.txt b/torch/CMakeLists.txt
-index 7242a53..3b7c48c 100644
+index 7242a53..ce139af 100644
 --- a/torch/CMakeLists.txt
 +++ b/torch/CMakeLists.txt
 @@ -304,7 +304,11 @@ if(USE_COREML_DELEGATE)
@@ -83,18 +83,30 @@ index 7242a53..3b7c48c 100644
  torch_compile_options(torch_python)  # see cmake/public/utils.cmake
  torch_optimize_layout_if_enabled(
    torch_python
-@@ -462,6 +466,15 @@ install(TARGETS torch_python DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+@@ -460,8 +464,26 @@ install(TARGETS torch_python DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+ # building it here lets both setuptools and scikit-build-core use the
+ # same code path.
  if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
-   Python_add_library(_C MODULE WITH_SOABI "${TORCH_SRC_DIR}/csrc/stub.c")
+-  Python_add_library(_C MODULE WITH_SOABI "${TORCH_SRC_DIR}/csrc/stub.c")
++  if(PYTHILO_IOS_FULL)
++    # On iOS the module ends up as a framework's binary, which App Store Connect
++    # accepts only as a dynamic library, not as a Mach-O bundle.
++    add_library(_C SHARED "${TORCH_SRC_DIR}/csrc/stub.c")
++    target_include_directories(_C PRIVATE ${Python_INCLUDE_DIRS})
++  else()
++    Python_add_library(_C MODULE WITH_SOABI "${TORCH_SRC_DIR}/csrc/stub.c")
++  endif()
    target_link_libraries(_C PRIVATE torch_python)
 +  if(PYTHILO_IOS_FULL)
 +    target_link_options(_C PRIVATE "LINKER:-force_load,$<TARGET_FILE:torch_python>")
-+    # Link CPython's framework, as iOS extension modules do, instead of looking its
-+    # symbols up at load time; and name the module for the iOS interpreter.
++    # Link CPython's framework, as iOS extension modules do, and name the module
++    # for the iOS interpreter.
 +    get_filename_component(_pythilo_frameworks "${Python_LIBRARY}" DIRECTORY)
 +    get_filename_component(_pythilo_frameworks "${_pythilo_frameworks}" DIRECTORY)
-+    target_link_options(_C PRIVATE "-F${_pythilo_frameworks}" "LINKER:-framework,Python")
-+    set_target_properties(_C PROPERTIES SUFFIX ".cpython-314-${PYTHILO_PLATFORM}.so")
++    set(_pythilo_module "_C.cpython-314-${PYTHILO_PLATFORM}.so")
++    target_link_options(_C PRIVATE "-F${_pythilo_frameworks}" "LINKER:-framework,Python"
++      "LINKER:-install_name,@rpath/${_pythilo_module}")
++    set_target_properties(_C PROPERTIES PREFIX "" SUFFIX ".cpython-314-${PYTHILO_PLATFORM}.so")
 +  endif()
    set_target_properties(_C PROPERTIES
      LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/torch"

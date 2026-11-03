@@ -97,7 +97,8 @@ adds one switch, `PYTHILO_IOS_FULL`, that keeps the desktop build while targetin
 - `CMakeLists.txt` and `Macros.h`: not the mobile build, so autograd and the Python
   bindings stay, and `C10_MOBILE` is not defined
 - `torch/CMakeLists.txt`: `torch_python` and `libshm` are static, and everything is
-  force-loaded into `torch._C`, which links `Python.framework` and takes the iOS name
+  force-loaded into `torch._C`, a dynamic library (App Store Connect refuses Mach-O
+  bundles inside frameworks) that links `Python.framework` and takes the iOS name
 - `FindvecLib.cmake`: iOS has Accelerate but no separate `libcblas`
 - `Dependencies.cmake`: the full ONNX library, not only its protobuf messages
 - two places that call `system()`, which iOS lacks, now fail cleanly instead

@@ -1,0 +1,205 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 142937a..489bf4d 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -881,8 +881,7 @@ endif()
+ # applicable to mobile are disabled by this variable. Setting
+ # `BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN` environment variable can force it
+ # to do mobile build with host toolchain - which is useful for testing purpose.
+-if(ANDROID
+-   OR IOS
++if(((ANDROID OR IOS) AND NOT PYTHILO_IOS_FULL)
+    OR DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
+   set(INTERN_BUILD_MOBILE ON)
+   message(WARNING "INTERN_BUILD_MOBILE is on, disabling BUILD_LAZY_TS_BACKEND")
+diff --git a/cmake/Dependencies.cmake b/cmake/Dependencies.cmake
+index eddf1f7..bfd6caa 100644
+--- a/cmake/Dependencies.cmake
++++ b/cmake/Dependencies.cmake
+@@ -1444,7 +1444,7 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
+   if(NOT USE_SYSTEM_ONNX)
+     # In mobile build we care about code size, and so we need drop
+     # everything (e.g. checker) in onnx but the pb definition.
+-    if(ANDROID OR IOS)
++    if((ANDROID OR IOS) AND NOT PYTHILO_IOS_FULL)
+       caffe2_interface_library(onnx_proto onnx_library)
+     else()
+       caffe2_interface_library(onnx onnx_library)
+diff --git a/cmake/Modules/FindvecLib.cmake b/cmake/Modules/FindvecLib.cmake
+index abd2512..d2c7f3e 100644
+--- a/cmake/Modules/FindvecLib.cmake
++++ b/cmake/Modules/FindvecLib.cmake
+@@ -24,7 +24,10 @@ include(FindPackageHandleStandardArgs)
+ find_package_handle_standard_args(vecLib DEFAULT_MSG vecLib_INCLUDE_DIR)
+ 
+ if(VECLIB_FOUND)
+-  if(vecLib_INCLUDE_DIR MATCHES "^/System/Library/Frameworks/vecLib.framework.*")
++  if(IOS)
++    # iOS has no separate libcblas; Accelerate carries BLAS and LAPACK.
++    set(vecLib_LINKER_LIBS "-framework Accelerate")
++  elseif(vecLib_INCLUDE_DIR MATCHES "^/System/Library/Frameworks/vecLib.framework.*")
+     set(vecLib_LINKER_LIBS -lcblas "-framework vecLib")
+     message(STATUS "Found standalone vecLib.framework")
+   else()
+diff --git a/cmake/PreBuildSteps.cmake b/cmake/PreBuildSteps.cmake
+index fa8a94c..8dff08a 100644
+--- a/cmake/PreBuildSteps.cmake
++++ b/cmake/PreBuildSteps.cmake
+@@ -61,7 +61,11 @@ if(NOT DEFINED USE_SYSTEM_LIBS OR NOT USE_SYSTEM_LIBS)
+   endif()
+ 
+   # Verify submodules contain expected files (catches corrupt/partial checkouts).
++  # The iOS build fetches only the submodules it uses.
+   set(_expected_files CMakeLists.txt Makefile setup.py LICENSE LICENSE.md LICENSE.txt)
++  if(PYTHILO_IOS_FULL)
++    set(_submodule_folders)
++  endif()
+   foreach(_dir IN LISTS _submodule_folders)
+     set(_found FALSE)
+     foreach(_file IN LISTS _expected_files)
+@@ -79,7 +83,7 @@ if(NOT DEFINED USE_SYSTEM_LIBS OR NOT USE_SYSTEM_LIBS)
+     endif()
+   endforeach()
+   # Extra check for fbgemm's nested dependency
+-  if(NOT EXISTS "${PROJECT_SOURCE_DIR}/third_party/fbgemm/external/asmjit/CMakeLists.txt")
++  if(NOT PYTHILO_IOS_FULL AND NOT EXISTS "${PROJECT_SOURCE_DIR}/third_party/fbgemm/external/asmjit/CMakeLists.txt")
+     message(FATAL_ERROR
+       "third_party/fbgemm/external/asmjit appears incomplete.\n"
+       "Please run: git submodule update --init --recursive"
+diff --git a/torch/CMakeLists.txt b/torch/CMakeLists.txt
+index 7242a53..3b7c48c 100644
+--- a/torch/CMakeLists.txt
++++ b/torch/CMakeLists.txt
+@@ -304,7 +304,11 @@ if(USE_COREML_DELEGATE)
+ endif()
+ 
+ 
+-add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
++if(PYTHILO_IOS_FULL)
++  add_library(torch_python STATIC ${TORCH_PYTHON_SRCS})
++else()
++  add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
++endif()
+ torch_compile_options(torch_python)  # see cmake/public/utils.cmake
+ torch_optimize_layout_if_enabled(
+   torch_python
+@@ -462,6 +466,15 @@ install(TARGETS torch_python DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
+   Python_add_library(_C MODULE WITH_SOABI "${TORCH_SRC_DIR}/csrc/stub.c")
+   target_link_libraries(_C PRIVATE torch_python)
++  if(PYTHILO_IOS_FULL)
++    target_link_options(_C PRIVATE "LINKER:-force_load,$<TARGET_FILE:torch_python>")
++    # Link CPython's framework, as iOS extension modules do, instead of looking its
++    # symbols up at load time; and name the module for the iOS interpreter.
++    get_filename_component(_pythilo_frameworks "${Python_LIBRARY}" DIRECTORY)
++    get_filename_component(_pythilo_frameworks "${_pythilo_frameworks}" DIRECTORY)
++    target_link_options(_C PRIVATE "-F${_pythilo_frameworks}" "LINKER:-framework,Python")
++    set_target_properties(_C PROPERTIES SUFFIX ".cpython-314-${PYTHILO_PLATFORM}.so")
++  endif()
+   set_target_properties(_C PROPERTIES
+     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/torch"
+     # libtorch_python.so is installed to lib/ relative to _C, so use
+diff --git a/torch/__init__.py b/torch/__init__.py
+index c2b2908..5c7b83c 100644
+--- a/torch/__init__.py
++++ b/torch/__init__.py
+@@ -400,7 +400,7 @@ def _preload_cuda_deps(err: OSError | None = None, required: bool = True) -> Non
+ 
+ # See Note [Global dependencies]
+ def _load_global_deps() -> None:
+-    if platform.system() == "Windows":
++    if platform.system() in ("Windows", "iOS"):
+         return
+ 
+     # Determine the file extension based on the platform
+@@ -2600,7 +2600,7 @@ from torch.serialization import load, save
+ 
+ # Shared memory manager needs to know the exact location of manager executable
+ def _manager_path() -> bytes:
+-    if platform.system() == "Windows":
++    if platform.system() in ("Windows", "iOS"):
+         return b""
+     path = get_file_path("torch", "bin", "torch_shm_manager")
+     prepare_multiprocessing_environment(get_file_path("torch"))
+diff --git a/torch/csrc/inductor/aoti_package/model_package_loader.cpp b/torch/csrc/inductor/aoti_package/model_package_loader.cpp
+index b6200ac..5d4e05b 100644
+--- a/torch/csrc/inductor/aoti_package/model_package_loader.cpp
++++ b/torch/csrc/inductor/aoti_package/model_package_loader.cpp
+@@ -22,6 +22,12 @@
+ 
+ namespace fs = c10::filesystem;
+ 
++#if defined(PYTHILO_IOS_FULL)
++// iOS has no shell and no compiler, so nothing here can be compiled at run time.
++static int pythilo_no_system(const char*) { return -1; }
++#define system pythilo_no_system
++#endif
++
+ namespace {
+ 
+ const std::string k_separator = "/";
+diff --git a/torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp b/torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp
+index 65f487a..a35cb7e 100644
+--- a/torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp
++++ b/torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp
+@@ -12,6 +12,12 @@
+ #include <iostream>
+ #include <string>
+ 
++#if defined(PYTHILO_IOS_FULL)
++// iOS has no shell and no compiler, so nothing here can be compiled at run time.
++static int pythilo_no_system(const char*) { return -1; }
++#define system pythilo_no_system
++#endif
++
+ namespace torch::jit::fuser::cpu {
+ 
+ #ifdef _MSC_VER
+diff --git a/torch/headeronly/macros/Macros.h b/torch/headeronly/macros/Macros.h
+index 718bd35..9f3520b 100644
+--- a/torch/headeronly/macros/Macros.h
++++ b/torch/headeronly/macros/Macros.h
+@@ -692,7 +692,9 @@ rocm_assert_one_shot(const char (&msg)[N], unsigned length) {
+     defined(__APPLE__) && \
+     (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE))
+ #define C10_IOS 1
++#ifndef PYTHILO_IOS_FULL
+ #define C10_MOBILE 1
++#endif
+ #endif // ANDROID / IOS
+ 
+ #if defined(C10_MOBILE) && C10_MOBILE
+diff --git a/torch/lib/libshm/CMakeLists.txt b/torch/lib/libshm/CMakeLists.txt
+index 688e7e7..7c0be97 100644
+--- a/torch/lib/libshm/CMakeLists.txt
++++ b/torch/lib/libshm/CMakeLists.txt
+@@ -7,7 +7,11 @@ if(NOT LIBSHM_INSTALL_LIB_SUBDIR)
+   set(LIBSHM_INSTALL_LIB_SUBDIR "lib" CACHE PATH "libshm install library directory")
+ endif()
+ 
+-add_library(shm SHARED core.cpp)
++if(PYTHILO_IOS_FULL)
++  add_library(shm STATIC core.cpp)
++else()
++  add_library(shm SHARED core.cpp)
++endif()
+ if(HAVE_SOVERSION)
+   set_target_properties(shm PROPERTIES
+       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+diff --git a/torch/multiprocessing/__init__.py b/torch/multiprocessing/__init__.py
+index 25da015..7a6be85 100644
+--- a/torch/multiprocessing/__init__.py
++++ b/torch/multiprocessing/__init__.py
+@@ -107,7 +107,11 @@ init_reductions()
+ # Leak ResourceTracker at exit for Python-3.12 on MacOS
+ # See https://github.com/pytorch/pytorch/issues/153050 and
+ # https://github.com/python/cpython/issues/88887 for more details
+-from multiprocessing.resource_tracker import ResourceTracker as _RT
++# iOS has no _multiprocessing, which the resource tracker needs.
++try:
++    from multiprocessing.resource_tracker import ResourceTracker as _RT
++except ImportError:
++    _RT = None
+ 
+ 
+ if (

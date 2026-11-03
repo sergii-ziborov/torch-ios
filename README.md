@@ -43,8 +43,13 @@ Not in this build:
 | PyTorch | 2.15.0 |
 | Python | CPython 3.14 (BeeWare's [Python-Apple-support](https://github.com/beeware/Python-Apple-support) 3.14-b14) |
 | Simulator (arm64) | built and tested inside an iOS app: training, NumPy, linalg, fft, conv, `torch.func`, `torch.jit`, DataLoader, save and load |
-| Device (arm64) | building; first runs on an iPhone pending |
+| Device (arm64) | built, minimum iOS 13.0; first runs on an iPhone pending |
 | Wheel | about 50 MB; `torch/_C` is about 115 MB once installed |
+
+## Download
+
+Prebuilt wheels for both platforms are on the
+[releases page](https://github.com/sergii-ziborov/torch-ios/releases). Or build them:
 
 ## Build
 

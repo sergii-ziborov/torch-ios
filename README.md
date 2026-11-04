@@ -101,6 +101,8 @@ adds one switch, `PYTHILO_IOS_FULL`, that keeps the desktop build while targetin
   bundles inside frameworks) that links `Python.framework` and takes the iOS name
 - `FindvecLib.cmake`: iOS has Accelerate but no separate `libcblas`
 - `Dependencies.cmake`: the full ONNX library, not only its protobuf messages
+- `Dependencies.cmake`: with Accelerate, `torch.dot` goes through `cblas_sdot`; Accelerate's
+  Fortran `sdot_` returns a double, which read as a float gave 0
 - two places that call `system()`, which iOS lacks, now fail cleanly instead
 - `torch/__init__.py`: no `libtorch_global_deps` and no `torch_shm_manager` to look for on iOS
 - `torch/multiprocessing`: iOS's CPython has no `_multiprocessing`, so the resource tracker is optional

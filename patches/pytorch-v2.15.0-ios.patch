@@ -13,10 +13,22 @@ index 142937a..489bf4d 100644
    set(INTERN_BUILD_MOBILE ON)
    message(WARNING "INTERN_BUILD_MOBILE is on, disabling BUILD_LAZY_TS_BACKEND")
 diff --git a/cmake/Dependencies.cmake b/cmake/Dependencies.cmake
-index eddf1f7..bfd6caa 100644
+index eddf1f7..97fafcf 100644
 --- a/cmake/Dependencies.cmake
 +++ b/cmake/Dependencies.cmake
-@@ -1444,7 +1444,7 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
+@@ -244,6 +244,11 @@ elseif(BLAS STREQUAL "vecLib")
+   set(BLAS_INFO "veclib")
+   set(BLAS_FOUND 1)
+   set(BLAS_LIBRARIES ${vecLib_LINKER_LIBS})
++  if(PYTHILO_IOS_FULL)
++    # Accelerate's Fortran sdot_ returns a double; cblas_sdot returns the float
++    # torch expects. Without this, torch.dot on iOS reads 0.
++    set(BLAS_USE_CBLAS_DOT TRUE)
++  endif()
+ elseif(BLAS STREQUAL "FlexiBLAS")
+   find_package(FlexiBLAS REQUIRED)
+   include_directories(SYSTEM ${FlexiBLAS_INCLUDE_DIR})
+@@ -1444,7 +1449,7 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
    if(NOT USE_SYSTEM_ONNX)
      # In mobile build we care about code size, and so we need drop
      # everything (e.g. checker) in onnx but the pb definition.

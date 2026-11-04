@@ -12,6 +12,19 @@ index 142937a..489bf4d 100644
     OR DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
    set(INTERN_BUILD_MOBILE ON)
    message(WARNING "INTERN_BUILD_MOBILE is on, disabling BUILD_LAZY_TS_BACKEND")
+diff --git a/aten/src/ATen/native/quantized/cpu/qnnpack/CMakeLists.txt b/aten/src/ATen/native/quantized/cpu/qnnpack/CMakeLists.txt
+index cd46687..df4547e 100644
+--- a/aten/src/ATen/native/quantized/cpu/qnnpack/CMakeLists.txt
++++ b/aten/src/ATen/native/quantized/cpu/qnnpack/CMakeLists.txt
+@@ -62,7 +62,7 @@ endif()
+ 
+ if(NOT CMAKE_SYSTEM_NAME)
+   message(FATAL_ERROR "CMAKE_SYSTEM_NAME not defined")
+-elseif(NOT CMAKE_SYSTEM_NAME MATCHES "^(Darwin|Linux|Android)$")
++elseif(NOT CMAKE_SYSTEM_NAME MATCHES "^(Darwin|Linux|Android|iOS)$")
+   message(FATAL_ERROR "Unrecognized CMAKE_SYSTEM_NAME = ${CMAKE_SYSTEM_NAME}")
+ endif()
+ 
 diff --git a/cmake/Dependencies.cmake b/cmake/Dependencies.cmake
 index eddf1f7..97fafcf 100644
 --- a/cmake/Dependencies.cmake

@@ -27,13 +27,15 @@ The full library, built from the PyTorch source with a small patch:
 - `torch.linalg` and LAPACK, matrix maths through Apple's Accelerate
 - `torch.fft`, `torch.distributions`, `torch.save` and `torch.load`
 - NumPy interop: `torch.from_numpy`, `tensor.numpy()`
-- `torch.jit.trace` and `torch.jit.script` (interpreted)
+- `torch.jit.trace` and `torch.jit.script` (interpreted), `torch.export`
+- `torch.compile` with the `eager` and `aot_eager` backends (no code generation)
+- quantisation on the QNNPACK engine: dynamic, static and quantised ops
 
 Not in this build:
 
 - GPU: no CUDA and no MPS, so training runs on the CPU
-- `torch.compile` and anything else that compiles code at run time: iOS has no
-  compiler on the device and forbids JIT
+- `torch.compile` with Inductor, or anything else that generates and compiles code at
+  run time: iOS has no compiler on the device and forbids JIT
 - `torch.distributed`, and DataLoader workers (one process only; keep `num_workers=0`)
 
 ## Status
@@ -70,6 +72,20 @@ Steps can be run one at a time: `./build.sh iphoneos fetch|configure|build|wheel
 `PYTHON_XCFRAMEWORK`, `NUMPY_INCLUDE`, `WORK`, `DIST` and `JOBS` override the defaults
 (see the top of `build.sh`).
 
+## Checking a build
+
+`tests/conformance.py` runs about 200 groups of operations (elementwise maths, reductions,
+linear algebra, convolutions, pooling, normalisation, losses, attention, recurrent layers,
+FFT, special functions, autograd and gradcheck, optimisers, `torch.func`, sparse,
+quantisation, `torch.compile`, `torch.export`, serialisation, data loading) on inputs
+made from formulas. Run it in the app and on a Mac with the same torch version, then:
+
+```sh
+python tests/compare.py mac.json ios.json
+```
+
+The current build matches the Mac on every group.
+
 ## Use it in an app
 
 The wheels follow [PEP 730](https://peps.python.org/pep-0730/) and install with pip like any iOS wheel:
@@ -104,6 +120,7 @@ adds one switch, `PYTHILO_IOS_FULL`, that keeps the desktop build while targetin
 - `Dependencies.cmake`: with Accelerate, `torch.dot` goes through `cblas_sdot`; Accelerate's
   Fortran `sdot_` returns a double, which read as a float gave 0
 - two places that call `system()`, which iOS lacks, now fail cleanly instead
+- QNNPACK's CMake accepts `CMAKE_SYSTEM_NAME` iOS, so quantised kernels are built
 - `torch/__init__.py`: no `libtorch_global_deps` and no `torch_shm_manager` to look for on iOS
 - `torch/multiprocessing`: iOS's CPython has no `_multiprocessing`, so the resource tracker is optional
 - `PreBuildSteps.cmake`: only the submodules this build uses have to be present

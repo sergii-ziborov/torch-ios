@@ -659,7 +659,7 @@ def _():
     x = det(4, 8) * 3
     q = torch.quantize_per_tensor(x, scale=0.05, zero_point=10, dtype=torch.quint8)
     qc = torch.quantize_per_channel(x, torch.full((4,), 0.04), torch.zeros(4, dtype=torch.long), 0, torch.qint8)
-    return (q.dequantize(), q.int_repr(), qc.dequantize(), torch.backends.quantized.supported_engines)
+    return (q.dequantize(), q.int_repr(), qc.dequantize(), torch.tensor("qnnpack" in torch.backends.quantized.supported_engines))
 
 
 @case("dtype.conversions")
@@ -723,10 +723,130 @@ def _():
     return (torch.stack(full), torch.stack(single), torch.tensor(before >= 1))
 
 
-@case("config.backends")
+@case("info.backends")
 def _():
     return (torch.tensor(torch.backends.mps.is_available()), torch.tensor(torch.cuda.is_available()),
             torch.tensor(torch.backends.openmp.is_available()), torch.tensor(torch.backends.mkldnn.is_available()))
+
+
+@case("quantized.dynamic_linear")
+def _():
+    torch.backends.quantized.engine = "qnnpack"
+    model = _load(nn.Sequential(nn.Linear(8, 16), nn.ReLU(), nn.Linear(16, 4)))
+    q = torch.ao.quantization.quantize_dynamic(model, {nn.Linear}, dtype=torch.qint8)
+    with torch.no_grad():
+        return (q(det(5, 8)), torch.tensor(torch.backends.quantized.engine == "qnnpack"))
+
+
+@case("quantized.static_conv")
+def _():
+    torch.backends.quantized.engine = "qnnpack"
+    import torch.ao.quantization as tq
+
+    class Net(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.quant, self.dequant = tq.QuantStub(), tq.DeQuantStub()
+            self.conv, self.relu = nn.Conv2d(2, 4, 3), nn.ReLU()
+
+        def forward(self, x):
+            return self.dequant(self.relu(self.conv(self.quant(x))))
+
+    net = _load(Net()).eval()
+    net.qconfig = tq.get_default_qconfig("qnnpack")
+    prepared = tq.prepare(net)
+    with torch.no_grad():
+        prepared(det(4, 2, 8, 8) * 2)
+        converted = tq.convert(prepared)
+        return converted(det(2, 2, 8, 8, k=1) * 2)
+
+
+@case("quantized.functional_ops")
+def _():
+    torch.backends.quantized.engine = "qnnpack"
+    x = torch.quantize_per_tensor(det(2, 3, 6, 6) * 2, 0.02, 128, torch.quint8)
+    return (torch.nn.quantized.functional.max_pool2d(x, 2).dequantize(), torch.ops.quantized.add(x, x, 0.04, 128).dequantize(),
+            F.relu(x).dequantize(), x.mean().dequantize() if hasattr(x.mean(), "dequantize") else x.dequantize().mean())
+
+
+@case("compile.eager_backends")
+def _():
+    model = _load(nn.Sequential(nn.Linear(4, 6), nn.ReLU(), nn.Linear(6, 2)))
+    x = det(3, 4)
+    torch._dynamo.reset()
+    eager = torch.compile(model, backend="eager")(x)
+    torch._dynamo.reset()
+    aot = torch.compile(model, backend="aot_eager")(x)
+    return (eager.detach(), aot.detach())
+
+
+@case("export.program")
+def _():
+    model = _load(nn.Sequential(nn.Linear(4, 6), nn.Tanh(), nn.Linear(6, 2))).eval()
+    x = det(3, 4)
+    program = torch.export.export(model, (x,))
+    with torch.no_grad():
+        return (program.module()(x), torch.tensor(len(program.graph.nodes)))
+
+
+@case("amp.autocast_bfloat16")
+def _():
+    a, b = det(16, 32), det(32, 8, k=1)
+    with torch.autocast("cpu", dtype=torch.bfloat16):
+        out = a @ b
+        lin = F.linear(a, b.T)
+    return (out.float(), torch.tensor(out.dtype == torch.bfloat16), lin.float())
+
+
+@case("nn.init_seeded")
+def _():
+    torch.manual_seed(5)
+    w = torch.empty(6, 8)
+    out = []
+    for init in (nn.init.xavier_uniform_, nn.init.xavier_normal_, nn.init.kaiming_uniform_, nn.init.kaiming_normal_,
+                 nn.init.orthogonal_, nn.init.trunc_normal_, nn.init.uniform_, nn.init.normal_):
+        out.append(init(w.clone()))
+    return tuple(out)
+
+
+@case("nn.utils_parametrize_clip")
+def _():
+    lin = _load(nn.Linear(5, 4))
+    weight_norm = torch.nn.utils.parametrizations.weight_norm(_load(nn.Linear(5, 4)))
+    spectral = torch.nn.utils.parametrizations.spectral_norm(_load(nn.Linear(5, 4)))
+    orth = torch.nn.utils.parametrizations.orthogonal(_load(nn.Linear(4, 4)))
+    loss = (lin(det(3, 5)) ** 2).sum() * 100
+    loss.backward()
+    total = torch.nn.utils.clip_grad_norm_(lin.parameters(), 1.0)
+    vector = torch.nn.utils.parameters_to_vector(lin.parameters())
+    x = det(2, 5)
+    with torch.no_grad():
+        return (total.detach(), lin.weight.grad.norm(), vector.detach(), weight_norm(x), spectral.weight.shape,
+                orth.weight @ orth.weight.T)
+
+
+@case("distributions.log_prob_and_sampling")
+def _():
+    d = torch.distributions
+    x = pos(6)
+    torch.manual_seed(11)
+    samples = (d.Normal(0.0, 1.0).sample((5,)), d.Categorical(probs=torch.tensor([0.2, 0.3, 0.5])).sample((5,)),
+               d.Dirichlet(torch.ones(3)).sample(), d.Gamma(2.0, 1.0).sample((3,)), d.Beta(2.0, 3.0).sample((3,)))
+    return (d.Normal(0.5, 2.0).log_prob(x), d.Bernoulli(probs=0.3).log_prob(torch.tensor([0.0, 1.0])),
+            d.Categorical(logits=det(4)).entropy(), d.Gamma(2.0, 3.0).log_prob(x), d.Beta(2.0, 3.0).log_prob(x / 2),
+            d.MultivariateNormal(torch.zeros(3), spd(3).float()).log_prob(det(4, 3)),
+            d.kl_divergence(d.Normal(0.0, 1.0), d.Normal(1.0, 2.0)), d.Poisson(3.0).log_prob(torch.tensor([0.0, 2.0, 5.0])),
+            d.Normal(0.0, 1.0).cdf(det(5)), d.Normal(0.0, 1.0).rsample((2,)).shape, *samples)
+
+
+@case("tensor.misc_methods")
+def _():
+    x = det(4, 5)
+    return (x.clone().fill_diagonal_(9), torch.diag_embed(det(2, 3)), torch.diagonal(det(3, 4, 4), dim1=1, dim2=2),
+            torch.trace(det(4, 4)), torch.rot90(x, 1, (0, 1)), torch.vander(det(4), N=3), torch.cov(x),
+            torch.corrcoef(x), torch.trapezoid(x, dim=1), torch.cumulative_trapezoid(x, dim=1), torch.logdet(spd(3)),
+            torch.renorm(x, 2, 0, 0.5), torch.histogram(det(50), bins=5).hist, torch.bucketize(x, torch.tensor([-0.5, 0.0, 0.5])),
+            torch.clamp(x, min=torch.zeros(5)), x.new_ones(2, 2), x.storage_offset(), torch.isin(torch.arange(6), torch.tensor([1, 4])))
 
 
 # Run -------------------------------------------------------------------------

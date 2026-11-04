@@ -129,7 +129,8 @@ configure() {
     -DUSE_CUDA=OFF -DUSE_ROCM=OFF -DUSE_XPU=OFF -DUSE_MPS=OFF -DUSE_VULKAN=OFF -DUSE_PYTORCH_METAL=OFF \
     -DUSE_DISTRIBUTED=OFF -DUSE_GLOO=OFF -DUSE_TENSORPIPE=OFF -DUSE_NCCL=OFF -DUSE_MPI=OFF \
     -DUSE_MKLDNN=OFF -DUSE_MKL=OFF -DUSE_FBGEMM=OFF -DUSE_KINETO=OFF -DUSE_ITT=OFF -DUSE_KLEIDIAI=OFF \
-    -DUSE_NNPACK=OFF -DUSE_XNNPACK=OFF -DUSE_PYTORCH_QNNPACK=OFF -DUSE_QNNPACK=OFF \
+    -DUSE_NNPACK=OFF -DUSE_XNNPACK=OFF -DUSE_QNNPACK=OFF \
+    -DUSE_PYTORCH_QNNPACK=ON -DIOS_ARCH=arm64 \
     -DUSE_OPENMP=OFF -DUSE_MAGMA=OFF -DUSE_MIMALLOC=OFF -DUSE_FLASH_ATTENTION=OFF -DUSE_MEM_EFF_ATTENTION=OFF \
     -DUSE_NUMPY=ON -DUSE_BLAS=ON -DUSE_LAPACK=ON -DBLAS=vecLib \
     -DvecLib_INCLUDE_DIR="$sdk/System/Library/Frameworks/Accelerate.framework/Frameworks/vecLib.framework/Headers" \
@@ -161,7 +162,8 @@ wheel() {
   for package in torch torchgen functorch; do
     rsync -a --prune-empty-dirs \
       --exclude 'csrc/' --exclude 'include/' --exclude 'lib/' --exclude 'share/' --exclude 'bin/' --exclude '__pycache__/' \
-      --include '*/' --include '*.py' --include '*.yaml' --include '*.json' --include 'py.typed' --exclude '*' \
+      --exclude '*.pyi' --exclude '*.ipynb' --exclude '*.md' --exclude '*.rst' --exclude '*.png' --exclude '*.bzl' \
+      --exclude '*.sh' --exclude '.gitignore' --exclude '*.a' --exclude '*.dylib' --exclude '*.so' \
       "$src/$package/" "$stage/$package/"
   done
   cp "$module" "$stage/torch/"

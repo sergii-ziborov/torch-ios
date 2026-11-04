@@ -62,6 +62,8 @@ def main(reference_path, candidate_path):
     candidate = json.load(open(candidate_path))
     problems = []
     for name, ref in reference["cases"].items():
+        if name.startswith("info."):
+            continue  # facts about the platform (MPS, OpenMP), expected to differ
         if name not in candidate["cases"]:
             problems.append(f"{name}: missing")
             continue

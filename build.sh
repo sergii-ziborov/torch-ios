@@ -111,6 +111,10 @@ configure() {
   local framework numpy
   framework="$(python_framework)/$slice"
   numpy=$(numpy_include)
+  # A cross build cannot run BLAS to learn how it returns floats, so say it:
+  # Accelerate returns them as doubles from sdot_ (f2c) and has cblas_sdot.
+  # Left unset, torch.dot and a 1-D @ 1-D read 0.
+  PYTORCH_BLAS_F2C=ON PYTORCH_BLAS_USE_CBLAS_DOT=ON \
   cmake -S "$src" -B "$out" -G Ninja \
     -DCMAKE_MAKE_PROGRAM="$venv/bin/ninja" \
     -DCMAKE_SYSTEM_NAME=iOS \
